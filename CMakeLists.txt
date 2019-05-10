@@ -8,3 +8,4 @@ add_subdirectory(wsrpc EXCLUDE_FROM_ALL)
 
 add_executable(nsgod src/nsgod.cpp)
 target_link_libraries(nsgod rpcws)
+set_property(TARGET nsgod PROPERTY CXX_STANDARD 17)
