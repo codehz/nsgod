@@ -30,3 +30,9 @@
 *.exe
 *.out
 *.app
+
+# Misc
+.ccls-cache
+.vscode
+build
+compile_commands.json

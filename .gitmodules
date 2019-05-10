@@ -1,0 +1,3 @@
+[submodule "wsrpc"]
+	path = wsrpc
+	url = https://github.com/CodeHz/wsrpc
