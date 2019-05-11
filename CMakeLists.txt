@@ -13,3 +13,6 @@ set_property(TARGET nsgod PROPERTY CXX_STANDARD 17)
 add_executable(nsctl src/nsctl.cpp)
 target_link_libraries(nsctl rpcws)
 set_property(TARGET nsctl PROPERTY CXX_STANDARD 17)
+
+install(TARGETS nsctl nsgod
+        RUNTIME DESTINATION bin)
