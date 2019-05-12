@@ -9,6 +9,7 @@
 #include "utils.hpp"
 
 LOAD_ENV(NSGOD_API, "ws+unix://nsgod.socket");
+LOAD_ENV(NSGOD_LOCK, "nsgod.lock");
 
 std::map<std::string, ProcessInfo> status_map;
 std::map<int, std::string> fdmap;
@@ -18,6 +19,7 @@ int main() {
   using namespace rpcws;
   try {
     init();
+    lockfile(NSGOD_LOCK);
     static RPC instance{ std::make_unique<server_wsio>(NSGOD_API) };
     static auto &handler = static_cast<server_wsio &>(instance.layer()).handler();
     signal(SIGINT, [](auto) { instance.stop(); });

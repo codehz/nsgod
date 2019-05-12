@@ -41,6 +41,7 @@ void init() {
   }
   setsid();
   assert(mount("proc", "/proc", "proc", 0, nullptr) == 0);
+  signal(SIGPIPE, SIG_IGN);
 }
 
 char *const *buildv(std::vector<std::string> &vec) {
