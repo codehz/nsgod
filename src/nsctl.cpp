@@ -1,4 +1,5 @@
 #include <cstring>
+#include <iterator>
 #include <rpcws.hpp>
 #include <sys/signal.h>
 
@@ -116,7 +117,12 @@ int main(int argc, char **argv) {
         case Mode::all_log: {
           instance
               .on("output",
-                  [](json data) { std::cout << "[" << data["service"].get<std::string>() << "]" << data["data"].get<std::string>() << std::endl; })
+                  [](json data) {
+                    auto tag = "[" + data["service"].get<std::string>() + "]";
+                    std::istringstream iss{ data["data"].get<std::string>() };
+                    std::string line;
+                    while (std::getline(iss, line)) std::cout << tag << line << std::endl;
+                  })
               .fail(do_fail);
         } break;
         case Mode::all_status: {
@@ -153,7 +159,7 @@ int main(int argc, char **argv) {
           instance
               .on("output",
                   [=](json data) {
-                    if (data["service"] == argv[2]) std::cout << data["service"] << ": " << data["data"] << std::endl;
+                    if (data["service"] == argv[2]) std::cout << data["data"].get<std::string>() << std::flush;
                   })
               .fail(do_fail);
         } break;

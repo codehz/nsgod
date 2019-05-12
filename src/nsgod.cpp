@@ -2,6 +2,8 @@
 #include <iostream>
 #include <memory>
 #include <rpcws.hpp>
+#include <stropts.h>
+#include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
 
@@ -23,7 +25,6 @@ int main() {
     static RPC instance{ std::make_unique<server_wsio>(NSGOD_API) };
     static auto &handler = static_cast<server_wsio &>(instance.layer()).handler();
     signal(SIGINT, [](auto) { instance.stop(); });
-    char buffer[0xFFFFF];
     signal(SIGCHLD, [](auto) {
       int wstatus;
       auto pid = waitpid(WAIT_ANY, &wstatus, WNOHANG | WUNTRACED | WCONTINUED);
@@ -46,15 +47,16 @@ int main() {
       }
     });
 
-    auto subproc = handler.reg([&](epoll_event const &e) {
+    auto subproc = handler.reg([](epoll_event const &e) {
+      static char buffer[0xFFFF];
       if (e.events & EPOLLERR || e.events & EPOLLHUP) {
         handler.del(e.data.fd);
         fdmap.erase(e.data.fd);
         close(e.data.fd);
         return;
       }
-      size_t count = ::recv(e.data.fd, buffer, sizeof(buffer), 0);
-      if (count <= 0) return;
+
+      size_t count = ::recv(e.data.fd, buffer, sizeof buffer, 0);
       instance.emit("output", json::object({ { "service", fdmap[e.data.fd] }, { "data", std::string_view{ buffer, count } } }));
     });
 
@@ -64,7 +66,6 @@ int main() {
 
     instance.reg("ping", [](auto client, json data) -> json { return data; });
     instance.reg("version", [](auto client, json data) -> json { return "v0.1.0"; });
-    instance.reg("list", [](auto client, json data) -> json { return status_map; });
     instance.reg("start", [&](auto client, json data) -> json {
       ProcessLaunchOptions opts;
       auto name = data["service"].get<std::string>();
