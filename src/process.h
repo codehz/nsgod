@@ -83,5 +83,5 @@ inline void from_json(rpc::json const &j, ProcessInfoClient &i) {
   j.at("options").get_to(i.options);
 }
 
-void init();
+int init();
 ProcessInfo createProcess(ProcessLaunchOptions options);

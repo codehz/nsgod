@@ -1,6 +1,7 @@
 #include "process.h"
 #include <fcntl.h>
 #include <filesystem>
+#include <sys/eventfd.h>
 #include <sys/mount.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
@@ -24,7 +25,7 @@ void map_to_root(int id, char const *filename) {
   write_sth_to_file(filename, buf, len);
 }
 
-void init() {
+int init() {
   int ceuid = geteuid();
   int cegid = getegid();
 
@@ -32,16 +33,22 @@ void init() {
   deny_to_setgroups();
   map_to_root(ceuid, "/proc/self/uid_map");
   map_to_root(cegid, "/proc/self/gid_map");
+
+  int ev = eventfd(0, 0);
+
   auto ret = fork();
   assert(ret >= 0);
   if (ret) {
-    int exitcode;
-    waitpid(WAIT_ANY, &exitcode, 0);
-    exit(exitcode);
+    signal(SIGCHLD, [](auto) { exit(EXIT_FAILURE); });
+    uint64_t val = 0;
+    read(ev, &val, 8);
+    exit(EXIT_SUCCESS);
   }
   setsid();
   assert(mount("proc", "/proc", "proc", 0, nullptr) == 0);
   signal(SIGPIPE, SIG_IGN);
+
+  return ev;
 }
 
 char *const *buildv(std::vector<std::string> &vec) {

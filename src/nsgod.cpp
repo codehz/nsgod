@@ -18,7 +18,7 @@ std::map<int, std::string> pidmap;
 int main() {
   using namespace rpcws;
   try {
-    init();
+    int ev = init();
     lockfile(NSGOD_LOCK);
     static RPC instance{ std::make_unique<server_wsio>(NSGOD_API) };
     static auto &handler = static_cast<server_wsio &>(instance.layer()).handler();
@@ -118,6 +118,12 @@ int main() {
       instance.stop();
       return nullptr;
     });
+
+    {
+      uint64_t x = 1;
+      write(ev, &x, 8);
+      close(ev);
+    }
 
     instance.start();
   } catch (std::runtime_error &e) { std::cerr << e.what() << std::endl; }
