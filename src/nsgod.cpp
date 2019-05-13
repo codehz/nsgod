@@ -70,7 +70,15 @@ int main() {
       ProcessLaunchOptions opts;
       auto name = data["service"].get<std::string>();
       data["options"].get_to(opts);
-      if (status_map.find(name) != status_map.end()) throw std::runtime_error("target service exists.");
+      if (auto it = status_map.find(name); it != status_map.end()) {
+        if (it->second.status == ProcessStatus::Exited) {
+          handler.del(it->second.fd);
+          fdmap.erase(it->second.fd);
+          pidmap.erase(it->second.pid);
+          status_map.erase(it);
+        } else
+          throw std::runtime_error("target service exists and not exited.");
+      }
       auto proc = createProcess(opts);
       status_map.emplace(name, proc);
       fdmap[proc.fd]   = name;
@@ -82,6 +90,7 @@ int main() {
       auto name    = data["service"].get<std::string>();
       auto content = data["data"].get<std::string>();
       if (auto it = status_map.find(name); it != status_map.end()) {
+        if (it->second.status == ProcessStatus::Exited) throw std::runtime_error("target service exited.");
         write(it->second.fd, content.data(), content.size());
         return json::object({ { name, "ok" } });
       } else
@@ -90,7 +99,7 @@ int main() {
     instance.reg("erase", [&](auto client, json data) -> json {
       auto name = data["service"].get<std::string>();
       if (auto it = status_map.find(name); it != status_map.end()) {
-        if (it->second.status != ProcessStatus::Exited) throw std::runtime_error("target service not fully exited.");
+        if (it->second.status != ProcessStatus::Exited) throw std::runtime_error("target service not exited.");
         handler.del(it->second.fd);
         fdmap.erase(it->second.fd);
         pidmap.erase(it->second.pid);
