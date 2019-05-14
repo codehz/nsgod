@@ -31,13 +31,14 @@ int main() {
       if (pid <= 0) return;
       auto service = pidmap[pid];
       auto &info   = status_map[service];
-      if (WSTOPSIG(wstatus)) {
-        if (info.options.waitstop && info.status == ProcessStatus::Waiting)
+      if (WIFSTOPPED(wstatus)) {
+        if (info.options.waitstop && info.status == ProcessStatus::Waiting) {
           kill(pid, SIGCONT);
-        else
+          instance.emit("started", json::object({ { "service", service } }));
+          info.status = ProcessStatus::Running;
+        } else
           info.status = ProcessStatus::Stopped;
       } else if (WIFCONTINUED(wstatus)) {
-        if (info.options.waitstop && info.status == ProcessStatus::Waiting) instance.emit("started", json::object({ { "service", service } }));
         info.status = ProcessStatus::Running;
       } else {
         info.status    = ProcessStatus::Exited;
@@ -45,6 +46,7 @@ int main() {
         pidmap.erase(pid);
         instance.emit("stopped", json::object({ { "service", service } }));
       }
+      instance.emit("updated", status_map);
     });
 
     auto subproc = handler.reg([](epoll_event const &e) {
@@ -63,6 +65,7 @@ int main() {
     instance.event("output");
     instance.event("started");
     instance.event("stopped");
+    instance.event("updated");
 
     instance.reg("ping", [](auto client, json data) -> json { return data; });
     instance.reg("version", [](auto client, json data) -> json { return "v0.1.0"; });

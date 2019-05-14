@@ -9,12 +9,15 @@
 
 namespace fs = std::filesystem;
 
+#define check_error(stmt)                                                                                                                            \
+  if (!(stmt)) throw std::runtime_error(std::string(#stmt ":") + strerror(errno));
+
 void write_sth_to_file(char const *path, char const *content, size_t len) {
   if (len == -1) len = strlen(content);
   int fd;
-  assert((fd = openat(AT_FDCWD, path, O_WRONLY)) >= 0);
-  assert(write(fd, content, len) == len);
-  assert(close(fd) == 0);
+  check_error((fd = openat(AT_FDCWD, path, O_WRONLY)) >= 0);
+  check_error(write(fd, content, len) == len);
+  check_error(close(fd) == 0);
 }
 
 void deny_to_setgroups() { write_sth_to_file("/proc/self/setgroups", "deny", -1); }
@@ -29,7 +32,7 @@ int init() {
   int ceuid = geteuid();
   int cegid = getegid();
 
-  assert(unshare(CLONE_NEWUSER | CLONE_NEWNS | CLONE_NEWPID | CLONE_NEWIPC) == 0);
+  check_error(unshare(CLONE_NEWUSER | CLONE_NEWNS | CLONE_NEWPID | CLONE_NEWIPC) == 0);
   deny_to_setgroups();
   map_to_root(ceuid, "/proc/self/uid_map");
   map_to_root(cegid, "/proc/self/gid_map");
@@ -37,7 +40,7 @@ int init() {
   int ev = eventfd(0, 0);
 
   auto ret = fork();
-  assert(ret >= 0);
+  check_error(ret >= 0);
   if (ret) {
     signal(SIGCHLD, [](auto) { exit(EXIT_FAILURE); });
     uint64_t val = 0;
@@ -45,7 +48,7 @@ int init() {
     exit(EXIT_SUCCESS);
   }
   setsid();
-  assert(mount("proc", "/proc", "proc", 0, nullptr) == 0);
+  check_error(mount("proc", "/proc", "proc", 0, nullptr) == 0);
   signal(SIGPIPE, SIG_IGN);
 
   return ev;
@@ -67,8 +70,8 @@ ProcessInfo createProcess(ProcessLaunchOptions options) {
   int fds[2];
   socketpair(AF_UNIX, SOCK_STREAM, 0, fds);
   auto pid = fork();
-  assert(pid >= 0);
-  if (!pid) {
+  if (pid < 0) throw std::runtime_error("failed to fork");
+  if (pid == 0) {
     close(fds[0]);
     dup2(fds[1], 0);
     dup2(fds[1], 1);
