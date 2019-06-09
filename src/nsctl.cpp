@@ -1,7 +1,11 @@
 #include <cstring>
 #include <iterator>
 #include <rpcws.hpp>
-#include <sys/signal.h>
+#include <sys/ioctl.h>
+#include <signal.h>
+#include <sys/signalfd.h>
+#include <termios.h>
+#include <unistd.h>
 
 #include "utils.hpp"
 
@@ -31,6 +35,7 @@ enum struct Mode {
   send,
   wait,
   shutdown,
+  attach,
 };
 
 int main(int argc, char **argv) {
@@ -68,6 +73,8 @@ int main(int argc, char **argv) {
       mode = Mode::send;
     else if (strcmp(argv[1], "wait") == 0)
       mode = Mode::wait;
+    else if (strcmp(argv[1], "attach") == 0)
+      mode = Mode::attach;
   } else if (argc == 4) {
     if (strcmp(argv[1], "kill") == 0) mode = Mode::kill;
   }
@@ -168,6 +175,59 @@ int main(int argc, char **argv) {
                   })
               .fail(do_fail);
         } break;
+        case Mode::attach: {
+          auto update_size = [=] {
+            struct winsize size;
+            ioctl(STDIN_FILENO, TIOCGWINSZ, &size);
+            instance.call("resize", json::object({ { "service", argv[2] }, { "column", size.ws_col }, { "row", size.ws_row } }));
+          };
+          auto sin = handler.reg([=](auto e) {
+            int nread;
+            ioctl(STDIN_FILENO, FIONREAD, &nread);
+            if (nread <= 0) {
+              instance.stop();
+              handler.shutdown();
+            }
+            char buf[nread];
+            read(STDIN_FILENO, buf, nread);
+            instance.call("send", { { "service", argv[2] }, { "data", std::string{ buf, (size_t)nread } } });
+          });
+          handler.add(EPOLLIN, STDIN_FILENO, sin);
+          auto sws = handler.reg([=](epoll_event const &e) {
+            signalfd_siginfo info;
+            read(e.data.fd, &info, sizeof info);
+            update_size();
+          });
+          sigset_t ss;
+          sigemptyset(&ss);
+          sigaddset(&ss, SIGWINCH);
+          sigprocmask(SIG_BLOCK, &ss, nullptr);
+          auto sfd = signalfd(-1, &ss, SFD_CLOEXEC);
+          printf("%d\n", sfd);
+          handler.add(EPOLLIN, sfd, sws);
+          struct termios term;
+          if (tcgetattr(STDIN_FILENO, &term) != 0) {
+            instance.stop();
+            handler.shutdown();
+            return;
+          }
+          term.c_lflag &= ~(ECHO | ICANON);
+          term.c_lflag |= IUTF8;
+          tcsetattr(STDIN_FILENO, TCSAFLUSH, &term);
+          update_size();
+          instance
+              .on("output",
+                  [=](json data) {
+                    if (data["service"] == argv[2]) std::cout << data["data"].get<std::string>() << std::flush;
+                  })
+              .fail(do_fail);
+          instance
+              .on("started",
+                  [=](json data) {
+                    if (data["service"] == argv[2]) update_size();
+                  })
+              .fail(do_fail);
+        } break;
         default: {
           instance.stop();
           handler.shutdown();
@@ -182,6 +242,7 @@ void printHelp() {
   std::cout << "nsctl" << std::endl;
   std::cout << "- help                    print this message" << std::endl;
   std::cout << "- version                 print version" << std::endl;
+  std::cout << "- shutdown                shutdown the server" << std::endl;
   std::cout << "- log [service]           monitor service's log" << std::endl;
   std::cout << "- status [service]        show runtime status of services" << std::endl;
   std::cout << "- start <service>         start service (configuation is read from stdin)" << std::endl;
@@ -189,4 +250,5 @@ void printHelp() {
   std::cout << "- kill <service> <signal> send signal (number) to service" << std::endl;
   std::cout << "- erase <service>         erase service (must be exited state)" << std::endl;
   std::cout << "- send <service>          send text to service" << std::endl;
+  std::cout << "- attach <service>        attach to service" << std::endl;
 }

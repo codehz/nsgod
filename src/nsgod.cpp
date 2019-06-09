@@ -108,14 +108,13 @@ int main() {
         throw std::runtime_error("target service not exists.");
     });
     instance.reg("resize", [&](auto client, json data) -> json {
-      auto name    = data["service"].get<std::string>();
-      auto content = data["data"].get<std::string>();
+      auto name = data["service"].get<std::string>();
       if (auto it = status_map.find(name); it != status_map.end()) {
         if (it->second.status == ProcessStatus::Exited) throw std::runtime_error("target service exited.");
         winsize ws;
         ioctl(it->second.fd, TIOCGWINSZ, &ws);
         ws.ws_col = data.value("column", ws.ws_col);
-        ws.ws_row = data.value("column", ws.ws_row);
+        ws.ws_row = data.value("row", ws.ws_row);
         ioctl(it->second.fd, TIOCSWINSZ, &ws);
         return json::object({ { name, "ok" } });
       } else
