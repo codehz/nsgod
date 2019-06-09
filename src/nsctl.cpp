@@ -121,7 +121,7 @@ int main(int argc, char **argv) {
       .then([=](auto) {
         switch (mode) {
         case Mode::shutdown: {
-          instance.call("shutdown", json::object({})).then(do_print).then(do_close);
+          instance.call("shutdown", json::object({})).then(do_close).fail(do_fail);
         } break;
         case Mode::print_version: {
           instance.call("version", json::object({})).then(do_print).then(do_close);

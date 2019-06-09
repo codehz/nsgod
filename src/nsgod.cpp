@@ -2,8 +2,10 @@
 #include <iostream>
 #include <memory>
 #include <rpcws.hpp>
+#include <signal.h>
 #include <stropts.h>
 #include <sys/ioctl.h>
+#include <sys/signalfd.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
 
@@ -149,8 +151,7 @@ int main() {
       return nullptr;
     });
     instance.reg("shutdown", [](auto client, json data) -> json {
-      instance.stop();
-      handler.shutdown();
+      kill(getpid(), SIGINT);
       return nullptr;
     });
 
@@ -158,6 +159,20 @@ int main() {
       uint64_t x = 1;
       write(ev, &x, sizeof x);
       close(ev);
+    }
+
+    {
+      sigset_t ss;
+      sigemptyset(&ss);
+      sigaddset(&ss, SIGINT);
+      sigprocmask(SIG_BLOCK, &ss, nullptr);
+      auto sfd = signalfd(-1, &ss, SFD_CLOEXEC);
+      handler.add(EPOLLIN, sfd, handler.reg([=](epoll_event const &e) {
+        signalfd_siginfo info;
+        read(e.data.fd, &info, sizeof info);
+        instance.stop();
+        handler.shutdown();
+      }));
     }
 
     instance.start();
