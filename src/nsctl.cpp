@@ -91,17 +91,22 @@ int main(int argc, char **argv) {
   default: break;
   }
 
-  static RPC::Client instance{ std::make_unique<client_wsio>(NSGOD_API) };
-  static auto &handler = static_cast<client_wsio &>(instance.layer()).handler();
+  auto ep = std::make_shared<epoll>();
+  static RPC::Client instance{ std::make_unique<client_wsio>(NSGOD_API, ep) };
+  static auto &handler = *ep;
   static auto do_print = [](auto data) { std::cout << data << std::endl; };
-  static auto do_close = [](auto) { instance.stop(); };
-  static auto do_fail  = [](auto ex) {
+  static auto do_close = [](auto) {
+    instance.stop();
+    handler.shutdown();
+  };
+  static auto do_fail = [](auto ex) {
     try {
       if (ex) std::rethrow_exception(ex);
     } catch (RemoteException const &ex) { std::cout << ex.full << std::endl; } catch (std::exception const &ex) {
       std::cout << ex.what() << std::endl;
     }
     instance.stop();
+    handler.shutdown();
   };
 
   instance.start()
@@ -165,10 +170,12 @@ int main(int argc, char **argv) {
         } break;
         default: {
           instance.stop();
+          handler.shutdown();
         } break;
         }
       })
       .fail(do_fail);
+  handler.wait();
 }
 
 void printHelp() {

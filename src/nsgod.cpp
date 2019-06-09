@@ -22,8 +22,9 @@ int main() {
   try {
     int ev = init(getenv("NSGOD_DEBUG"));
     lockfile(NSGOD_LOCK);
-    static RPC instance{ std::make_unique<server_wsio>(NSGOD_API) };
-    static auto &handler = static_cast<server_wsio &>(instance.layer()).handler();
+    auto ep = std::make_shared<epoll>();
+    static RPC instance{ std::make_unique<server_wsio>(NSGOD_API, ep) };
+    static auto &handler = *ep;
     signal(SIGINT, [](auto) { instance.stop(); });
     signal(SIGCHLD, [](auto) {
       int wstatus;
@@ -150,6 +151,7 @@ int main() {
     });
     instance.reg("shutdown", [](auto client, json data) -> json {
       instance.stop();
+      handler.shutdown();
       return nullptr;
     });
 
@@ -160,5 +162,6 @@ int main() {
     }
 
     instance.start();
+    handler.wait();
   } catch (std::runtime_error &e) { std::cerr << e.what() << std::endl; }
 }
