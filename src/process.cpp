@@ -1,6 +1,7 @@
 #include "process.h"
 #include <fcntl.h>
 #include <filesystem>
+#include <pty.h>
 #include <sys/eventfd.h>
 #include <sys/mount.h>
 #include <sys/socket.h>
@@ -28,9 +29,17 @@ void map_to_root(int id, char const *filename) {
   write_sth_to_file(filename, buf, len);
 }
 
-int init() {
+int init(bool debug) {
   int ceuid = geteuid();
   int cegid = getegid();
+
+  if (debug) {
+    check_error(unshare(CLONE_NEWUSER | CLONE_NEWNS | CLONE_NEWIPC) == 0);
+    deny_to_setgroups();
+    map_to_root(ceuid, "/proc/self/uid_map");
+    map_to_root(cegid, "/proc/self/gid_map");
+    return -1;
+  }
 
   check_error(unshare(CLONE_NEWUSER | CLONE_NEWNS | CLONE_NEWPID | CLONE_NEWIPC) == 0);
   deny_to_setgroups();
@@ -62,38 +71,61 @@ char *const *buildv(std::vector<std::string> &vec) {
   return ret;
 }
 
+inline __attribute__((always_inline)) void setup_env(ProcessLaunchOptions const &options) {
+  auto root = fs::path{ options.root };
+  for (auto &[k, v] : options.mounts) {
+    auto src = root / k;
+    auto tgt = fs::path{ v };
+    mount(tgt.c_str(), src.c_str(), "tmpfs", MS_BIND | MS_REC, nullptr);
+  }
+  chroot(root.c_str());
+  chdir(options.cwd.c_str());
+}
+
 ProcessInfo createProcess(ProcessLaunchOptions options) {
   ProcessInfo ret{
     .start_time = std::chrono::system_clock::now(),
     .options    = options,
   };
-  int fds[2];
-  socketpair(AF_UNIX, SOCK_STREAM, 0, fds);
-  auto pid = fork();
-  if (pid < 0) throw std::runtime_error("failed to fork");
-  if (pid == 0) {
-    close(fds[0]);
-    dup2(fds[1], 0);
-    dup2(fds[1], 1);
-    dup2(fds[1], 2);
-    close(fds[1]);
-    auto root = fs::path{ options.root };
-    for (auto &[k, v] : options.mounts) {
-      auto src = root / k;
-      auto tgt = fs::path{ v };
-      mount(tgt.c_str(), src.c_str(), "tmpfs", MS_BIND | MS_REC, nullptr);
-    }
-    chroot(root.c_str());
-    chdir(options.cwd.c_str());
-
-    auto argv = buildv(options.cmdline);
-    auto envp = buildv(options.env);
-
-    execvpe(argv[0], argv, envp);
+  if (!options.log.empty()) {
+    ret.log = open64(options.log.c_str(), O_APPEND | O_CLOEXEC | O_CREAT, 0600);
+    if (ret.log == -1) throw std::runtime_error("failed to open log file");
   }
-  close(fds[1]);
-  ret.pid    = pid;
-  ret.status = options.waitstop ? ProcessStatus::Waiting : ProcessStatus::Running;
-  ret.fd     = fds[0];
+  if (options.pty) {
+    auto pid = forkpty(&ret.fd, nullptr, nullptr, nullptr);
+    if (pid < 0) throw std::runtime_error("failed to fork");
+    if (pid == 0) {
+      setup_env(options);
+
+      auto argv = buildv(options.cmdline);
+      auto envp = buildv(options.env);
+
+      _exit(execvpe(argv[0], argv, envp));
+    }
+    ret.pid    = pid;
+    ret.status = options.waitstop ? ProcessStatus::Waiting : ProcessStatus::Running;
+  } else {
+    int fds[2];
+    socketpair(AF_UNIX, SOCK_STREAM, 0, fds);
+    auto pid = fork();
+    if (pid < 0) throw std::runtime_error("failed to fork");
+    if (pid == 0) {
+      close(fds[0]);
+      dup2(fds[1], 0);
+      dup2(fds[1], 1);
+      dup2(fds[1], 2);
+      close(fds[1]);
+      setup_env(options);
+
+      auto argv = buildv(options.cmdline);
+      auto envp = buildv(options.env);
+
+      _exit(execvpe(argv[0], argv, envp));
+    }
+    close(fds[1]);
+    ret.pid    = pid;
+    ret.status = options.waitstop ? ProcessStatus::Waiting : ProcessStatus::Running;
+    ret.fd     = fds[0];
+  }
   return ret;
 }

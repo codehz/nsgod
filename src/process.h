@@ -1,6 +1,8 @@
 #pragma once
 
 #include <chrono>
+#include <fstream>
+#include <memory>
 #include <map>
 #include <rpc.hpp>
 #include <string>
@@ -21,8 +23,8 @@ NLOHMANN_JSON_SERIALIZE_ENUM(ProcessStatus, {
                                             });
 
 struct ProcessLaunchOptions {
-  bool waitstop;
-  std::string root, cwd;
+  bool waitstop, pty;
+  std::string root, cwd, log;
   std::vector<std::string> cmdline, env;
   std::map<std::string, std::string> mounts;
 };
@@ -32,7 +34,7 @@ struct ProcessInfo {
   ProcessStatus status;
   std::chrono::system_clock::time_point start_time, dead_time;
   ProcessLaunchOptions options;
-  int fd;
+  int fd, log;
 };
 
 struct ProcessInfoClient {
@@ -44,9 +46,11 @@ struct ProcessInfoClient {
 
 inline void to_json(rpc::json &j, const ProcessLaunchOptions &i) {
   j["waitstop"] = i.waitstop;
+  j["pty"]      = i.pty;
   j["cmdline"]  = i.cmdline;
   j["root"]     = i.root;
   j["cwd"]      = i.cwd;
+  j["log"]      = i.log;
   j["env"]      = i.env;
   j["mounts"]   = i.mounts;
 }
@@ -54,10 +58,12 @@ inline void to_json(rpc::json &j, const ProcessLaunchOptions &i) {
 inline void from_json(const rpc::json &j, ProcessLaunchOptions &i) {
   j.at("cmdline").get_to(i.cmdline);
   i.waitstop = j.value("waitstop", false);
-  i.root = j.value("root", "/");
-  i.cwd = j.value("cwd", ".");
-  i.env = j.value("env", std::vector<std::string>{});
-  i.mounts = j.value("mounts", std::map<std::string, std::string>{});
+  i.pty      = j.value("pty", false);
+  i.root     = j.value("root", "/");
+  i.cwd      = j.value("cwd", ".");
+  i.log      = j.value("log", "");
+  i.env      = j.value("env", std::vector<std::string>{});
+  i.mounts   = j.value("mounts", std::map<std::string, std::string>{});
 }
 
 namespace nlohmann {
@@ -83,5 +89,5 @@ inline void from_json(rpc::json const &j, ProcessInfoClient &i) {
   j.at("options").get_to(i.options);
 }
 
-int init();
+int init(bool debug);
 ProcessInfo createProcess(ProcessLaunchOptions options);

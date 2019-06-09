@@ -20,7 +20,7 @@ std::map<int, std::string> pidmap;
 int main() {
   using namespace rpcws;
   try {
-    int ev = init();
+    int ev = init(getenv("NSGOD_DEBUG"));
     lockfile(NSGOD_LOCK);
     static RPC instance{ std::make_unique<server_wsio>(NSGOD_API) };
     static auto &handler = static_cast<server_wsio &>(instance.layer()).handler();
@@ -55,11 +55,16 @@ int main() {
         handler.del(e.data.fd);
         fdmap.erase(e.data.fd);
         close(e.data.fd);
+        auto srv = fdmap[e.data.fd];
+        if (status_map[srv].log) close(status_map[srv].log);
         return;
       }
 
-      size_t count = ::recv(e.data.fd, buffer, sizeof buffer, 0);
-      instance.emit("output", json::object({ { "service", fdmap[e.data.fd] }, { "data", std::string_view{ buffer, count } } }));
+      ssize_t count = ::read(e.data.fd, buffer, sizeof buffer);
+      std::string_view data{ buffer, (size_t) count };
+      auto srv = fdmap[e.data.fd];
+      if (status_map[srv].log) write(status_map[srv].log, buffer, count);
+      instance.emit("output", json::object({ { "service", srv }, { "data", std::string{ buffer, (size_t) count } } }));
     });
 
     instance.event("output");
@@ -99,6 +104,20 @@ int main() {
       } else
         throw std::runtime_error("target service not exists.");
     });
+    instance.reg("resize", [&](auto client, json data) -> json {
+      auto name    = data["service"].get<std::string>();
+      auto content = data["data"].get<std::string>();
+      if (auto it = status_map.find(name); it != status_map.end()) {
+        if (it->second.status == ProcessStatus::Exited) throw std::runtime_error("target service exited.");
+        winsize ws;
+        ioctl(it->second.fd, TIOCGWINSZ, &ws);
+        ws.ws_col = data.value("column", ws.ws_col);
+        ws.ws_row = data.value("column", ws.ws_row);
+        ioctl(it->second.fd, TIOCSWINSZ, &ws);
+        return json::object({ { name, "ok" } });
+      } else
+        throw std::runtime_error("target service not exists.");
+    });
     instance.reg("erase", [&](auto client, json data) -> json {
       auto name = data["service"].get<std::string>();
       if (auto it = status_map.find(name); it != status_map.end()) {
@@ -132,9 +151,9 @@ int main() {
       return nullptr;
     });
 
-    {
+    if (ev != -1) {
       uint64_t x = 1;
-      write(ev, &x, 8);
+      write(ev, &x, sizeof x);
       close(ev);
     }
 
