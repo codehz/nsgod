@@ -88,7 +88,7 @@ ProcessInfo createProcess(ProcessLaunchOptions options) {
     .options    = options,
   };
   if (!options.log.empty()) {
-    ret.log = open64(options.log.c_str(), O_APPEND | O_CLOEXEC | O_CREAT, 0600);
+    ret.log = open64(options.log.c_str(), O_WRONLY | O_APPEND | O_CLOEXEC | O_CREAT, 0600);
     if (ret.log == -1) throw std::runtime_error("failed to open log file");
   }
   if (options.pty) {

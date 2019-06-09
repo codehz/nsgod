@@ -55,16 +55,18 @@ int main() {
         handler.del(e.data.fd);
         fdmap.erase(e.data.fd);
         close(e.data.fd);
-        auto srv = fdmap[e.data.fd];
-        if (status_map[srv].log) close(status_map[srv].log);
+        auto srv     = fdmap[e.data.fd];
+        auto &status = status_map[srv];
+        if (status.log) close(status.log);
         return;
       }
 
-      ssize_t count = ::read(e.data.fd, buffer, sizeof buffer);
-      std::string_view data{ buffer, (size_t) count };
-      auto srv = fdmap[e.data.fd];
-      if (status_map[srv].log) write(status_map[srv].log, buffer, count);
-      instance.emit("output", json::object({ { "service", srv }, { "data", std::string{ buffer, (size_t) count } } }));
+      ssize_t count = read(e.data.fd, buffer, sizeof buffer);
+      std::string_view data{ buffer, (size_t)count };
+      auto srv     = fdmap[e.data.fd];
+      auto &status = status_map[srv];
+      if (status.log) write(status.log, buffer, count);
+      instance.emit("output", json::object({ { "service", srv }, { "data", std::string{ buffer, (size_t)count } } }));
     });
 
     instance.event("output");
