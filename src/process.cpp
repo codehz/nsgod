@@ -30,6 +30,13 @@ void map_to_root(int id, char const *filename) {
 }
 
 int init(bool debug) {
+  for (int i = 3; i < 256; i++) close(i);
+  int fnull = open("/dev/null", O_RDWR);
+  dup3(fnull, STDIN_FILENO, 0);
+  dup3(fnull, STDOUT_FILENO, 0);
+  dup3(fnull, STDERR_FILENO, 0);
+  close(fnull);
+
   int ceuid = geteuid();
   int cegid = getegid();
 

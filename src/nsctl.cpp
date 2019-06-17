@@ -203,10 +203,10 @@ int main(int argc, char **argv) {
           sigaddset(&ss, SIGWINCH);
           sigprocmask(SIG_BLOCK, &ss, nullptr);
           auto sfd = signalfd(-1, &ss, SFD_CLOEXEC);
-          printf("%d\n", sfd);
           handler.add(EPOLLIN, sfd, sws);
           struct termios term;
           if (tcgetattr(STDIN_FILENO, &term) != 0) {
+            std::cerr << "terminal is required" << std::endl;
             instance.stop();
             handler.shutdown();
             return;

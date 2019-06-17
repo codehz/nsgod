@@ -27,49 +27,29 @@ int main() {
     auto ep = std::make_shared<epoll>();
     static RPC instance{ std::make_unique<server_wsio>(NSGOD_API, ep) };
     static auto &handler = *ep;
-    signal(SIGINT, [](auto) { instance.stop(); });
-    signal(SIGCHLD, [](auto) {
-      int wstatus;
-      auto pid = waitpid(WAIT_ANY, &wstatus, WNOHANG | WUNTRACED | WCONTINUED);
-      if (pid <= 0) return;
-      auto service = pidmap[pid];
-      auto &info   = status_map[service];
-      if (WIFSTOPPED(wstatus)) {
-        if (info.options.waitstop && info.status == ProcessStatus::Waiting) {
-          kill(pid, SIGCONT);
-          instance.emit("started", json::object({ { "service", service } }));
-          info.status = ProcessStatus::Running;
-        } else
-          info.status = ProcessStatus::Stopped;
-      } else if (WIFCONTINUED(wstatus)) {
-        info.status = ProcessStatus::Running;
-      } else {
-        info.status    = ProcessStatus::Exited;
-        info.dead_time = std::chrono::system_clock::now();
-        pidmap.erase(pid);
-        instance.emit("stopped", json::object({ { "service", service } }));
-      }
-      instance.emit("updated", status_map);
-    });
 
-    auto subproc = handler.reg([](epoll_event const &e) {
+    static auto subproc = handler.reg([](epoll_event const &e) {
       static char buffer[0xFFFF];
       if (e.events & EPOLLERR || e.events & EPOLLHUP) {
         handler.del(e.data.fd);
         fdmap.erase(e.data.fd);
         close(e.data.fd);
-        auto srv     = fdmap[e.data.fd];
-        auto &status = status_map[srv];
-        if (status.log) close(status.log);
+        auto srv = fdmap[e.data.fd];
+        if (auto it = status_map.find(srv); it != status_map.end()) {
+          auto &status = it->second;
+          if (status.log) close(status.log);
+        }
         return;
       }
 
       ssize_t count = read(e.data.fd, buffer, sizeof buffer);
       std::string_view data{ buffer, (size_t)count };
-      auto srv     = fdmap[e.data.fd];
-      auto &status = status_map[srv];
-      if (status.log) write(status.log, buffer, count);
-      instance.emit("output", json::object({ { "service", srv }, { "data", std::string{ buffer, (size_t)count } } }));
+      auto srv = fdmap[e.data.fd];
+      if (auto it = status_map.find(srv); it != status_map.end()) {
+        auto &status = it->second;
+        if (status.log) write(status.log, buffer, count);
+        instance.emit("output", json::object({ { "service", srv }, { "data", std::string{ buffer, (size_t)count } } }));
+      }
     });
 
     instance.event("output");
@@ -165,13 +145,83 @@ int main() {
       sigset_t ss;
       sigemptyset(&ss);
       sigaddset(&ss, SIGINT);
+      sigaddset(&ss, SIGCHLD);
       sigprocmask(SIG_BLOCK, &ss, nullptr);
       auto sfd = signalfd(-1, &ss, SFD_CLOEXEC);
       handler.add(EPOLLIN, sfd, handler.reg([=](epoll_event const &e) {
         signalfd_siginfo info;
         read(e.data.fd, &info, sizeof info);
-        instance.stop();
-        handler.shutdown();
+        switch (info.ssi_signo) {
+        case SIGINT: {
+          instance.stop();
+          handler.shutdown();
+        } break;
+        case SIGCHLD: {
+          int wstatus;
+          auto pid = waitpid(WAIT_ANY, &wstatus, WNOHANG | WUNTRACED | WCONTINUED);
+          if (pid <= 0) return;
+          auto service = pidmap[pid];
+          auto &info   = status_map[service];
+          if (WIFSTOPPED(wstatus)) {
+            if (info.options.waitstop && info.status == ProcessStatus::Waiting) {
+              kill(pid, SIGCONT);
+              instance.emit("started", json::object({ { "service", service } }));
+              info.status = ProcessStatus::Running;
+            } else
+              info.status = ProcessStatus::Stopped;
+          } else if (WIFCONTINUED(wstatus)) {
+            info.status = ProcessStatus::Running;
+          } else {
+            info.status    = ProcessStatus::Exited;
+            auto last      = info.dead_time;
+            info.dead_time = std::chrono::system_clock::now();
+            pidmap.erase(pid);
+            if (info.options.restart.enabled) {
+              if (info.dead_time - last > info.options.restart.reset_timer) { info.restart = 0; }
+              if (info.restart >= info.options.restart.max) {
+                instance.emit("stopped", json::object({
+                                             { "service", service },
+                                             { "restart", json::object({
+                                                              { "error", "max" },
+                                                          }) },
+                                         }));
+              } else {
+                info.restart++;
+                try {
+                  auto proc = createProcess(info.options);
+                  handler.del(info.fd);
+                  fdmap.erase(info.fd);
+                  info.fd          = proc.fd;
+                  info.pid         = proc.pid;
+                  info.start_time  = proc.start_time;
+                  info.status      = proc.status;
+                  info.log         = proc.log;
+                  fdmap[proc.fd]   = service;
+                  pidmap[proc.pid] = service;
+                  handler.add(EPOLLIN, proc.fd, subproc);
+                  instance.emit("stopped", json::object({
+                                               { "service", service },
+                                               { "restart", json::object({
+                                                                { "max", info.options.restart.max },
+                                                                { "current", info.restart },
+                                                            }) },
+                                           }));
+                } catch (std::exception &x) {
+                  instance.emit("stopped", json::object({
+                                               { "service", service },
+                                               { "restart", json::object({
+                                                                { "error", "failed to restart" },
+                                                            }) },
+                                           }));
+                }
+              }
+            } else {
+              instance.emit("stopped", json::object({ { "service", service } }));
+            }
+          }
+          instance.emit("updated", status_map);
+        } break;
+        }
       }));
     }
 
