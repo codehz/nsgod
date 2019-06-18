@@ -124,10 +124,19 @@ int main() {
       }
     });
     instance.reg("kill", [](auto client, json data) -> json {
-      auto name = data["service"].get<std::string>();
-      auto sig  = data["signal"].get<int>();
-      if (status_map.find(name) == status_map.end()) throw std::runtime_error("target service not exists.");
-      if (kill(status_map[name].pid, sig) != 0) throw std::runtime_error(strerror(errno));
+      auto name    = data["service"].get<std::string>();
+      auto sig     = data["signal"].get<int>();
+      auto restart = data.value("restart", 0);
+      if (auto it = status_map.find(name); it == status_map.end())
+        throw std::runtime_error("target service not exists.");
+      else {
+        switch (restart) {
+        case 0: break;
+        case -1: it->second.restart = std::numeric_limits<decltype(it->second.restart)>::max(); break;
+        case 1: it->second.sched_restart = true; break;
+        }
+        if (kill(it->second.pid, sig) != 0) throw std::runtime_error(strerror(errno));
+      }
       return nullptr;
     });
     instance.reg("shutdown", [](auto client, json data) -> json {
@@ -176,9 +185,9 @@ int main() {
             auto last      = info.dead_time;
             info.dead_time = std::chrono::system_clock::now();
             pidmap.erase(pid);
-            if (info.options.restart.enabled && (!WIFSIGNALED(wstatus) || WTERMSIG(wstatus) != SIGTERM)) {
-              if (info.dead_time - last > info.options.restart.reset_timer) { info.restart = 0; }
-              if (info.restart >= info.options.restart.max) {
+            if (info.sched_restart || (info.options.restart.enabled && (!WIFSIGNALED(wstatus) || WTERMSIG(wstatus) != SIGTERM))) {
+              if (!info.sched_restart && info.dead_time - last > info.options.restart.reset_timer) { info.restart = 0; }
+              if (!info.sched_restart && info.restart >= info.options.restart.max) {
                 instance.emit("stopped", json::object({
                                              { "service", service },
                                              { "restart", json::object({
@@ -186,7 +195,10 @@ int main() {
                                                           }) },
                                          }));
               } else {
-                info.restart++;
+                if (info.sched_restart)
+                  info.sched_restart = false;
+                else
+                  info.restart++;
                 try {
                   auto proc = createProcess(info.options);
                   handler.del(info.fd);

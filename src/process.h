@@ -42,6 +42,7 @@ struct ProcessInfo {
   pid_t pid;
   ProcessStatus status;
   int restart;
+  bool sched_restart;
   std::chrono::system_clock::time_point start_time, dead_time;
   ProcessLaunchOptions options;
   int fd, log;
