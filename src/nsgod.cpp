@@ -176,7 +176,7 @@ int main() {
             auto last      = info.dead_time;
             info.dead_time = std::chrono::system_clock::now();
             pidmap.erase(pid);
-            if (info.options.restart.enabled) {
+            if (info.options.restart.enabled && (!WIFSIGNALED(wstatus) || WTERMSIG(wstatus) != SIGTERM)) {
               if (info.dead_time - last > info.options.restart.reset_timer) { info.restart = 0; }
               if (info.restart >= info.options.restart.max) {
                 instance.emit("stopped", json::object({
