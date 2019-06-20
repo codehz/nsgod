@@ -185,6 +185,7 @@ int main() {
             auto last      = info.dead_time;
             info.dead_time = std::chrono::system_clock::now();
             pidmap.erase(pid);
+            close(info.log);
             if (info.sched_restart || info.options.restart.enabled) {
               if (!info.sched_restart && info.dead_time - last > info.options.restart.reset_timer) { info.restart = 0; }
               if (!info.sched_restart && info.restart >= info.options.restart.max) {
