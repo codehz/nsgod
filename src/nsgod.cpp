@@ -126,15 +126,11 @@ int main() {
     instance.reg("kill", [](auto client, json data) -> json {
       auto name    = data["service"].get<std::string>();
       auto sig     = data["signal"].get<int>();
-      auto restart = data.value("restart", 0);
+      auto restart = data.value("restart", RestartMode::Normal);
       if (auto it = status_map.find(name); it == status_map.end())
         throw std::runtime_error("target service not exists.");
       else {
-        switch (restart) {
-        case 0: break;
-        case -1: it->second.restart = std::numeric_limits<decltype(it->second.restart)>::max(); break;
-        case 1: it->second.sched_restart = true; break;
-        }
+        it->second.restart_mode = restart;
         if (kill(it->second.pid, sig) != 0) throw std::runtime_error(strerror(errno));
       }
       return nullptr;
@@ -186,9 +182,10 @@ int main() {
             info.dead_time = std::chrono::system_clock::now();
             pidmap.erase(pid);
             close(info.log);
-            if (info.sched_restart || info.options.restart.enabled) {
-              if (!info.sched_restart && info.dead_time - last > info.options.restart.reset_timer) { info.restart = 0; }
-              if (!info.sched_restart && info.restart >= info.options.restart.max) {
+            if (info.restart_mode == RestartMode::Force || info.options.restart.enabled) {
+              if (info.restart_mode == RestartMode::Normal && info.dead_time - last > info.options.restart.reset_timer) { info.restart = 0; }
+              if (info.restart_mode == RestartMode::Prevent ||
+                  (info.restart_mode == RestartMode::Normal && info.restart++ >= info.options.restart.max)) {
                 instance.emit("stopped", json::object({
                                              { "service", service },
                                              { "restart", json::object({
@@ -196,10 +193,7 @@ int main() {
                                                           }) },
                                          }));
               } else {
-                if (info.sched_restart)
-                  info.sched_restart = false;
-                else
-                  info.restart++;
+                info.restart_mode = RestartMode::Normal;
                 try {
                   auto proc = createProcess(info.options);
                   handler.del(info.fd);

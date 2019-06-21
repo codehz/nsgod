@@ -1,8 +1,8 @@
 #include <cstring>
 #include <iterator>
 #include <rpcws.hpp>
-#include <sys/ioctl.h>
 #include <signal.h>
+#include <sys/ioctl.h>
 #include <sys/signalfd.h>
 #include <termios.h>
 #include <unistd.h>
@@ -144,7 +144,7 @@ int main(int argc, char **argv) {
           instance.call("status", json::object({ { "service", argv[2] } })).then(do_print).then(do_close).fail(do_fail);
         } break;
         case Mode::stop: {
-          instance.call("kill", json::object({ { "service", argv[2] }, { "signal", SIGTERM } })).then(do_close).fail(do_fail);
+          instance.call("kill", json::object({ { "service", argv[2] }, { "signal", SIGTERM }, { "restart", -1 } })).then(do_close).fail(do_fail);
         } break;
         case Mode::kill: {
           instance.call("kill", json::object({ { "service", argv[2] }, { "signal", atoi(argv[3]) } })).then(do_close).fail(do_fail);

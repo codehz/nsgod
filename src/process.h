@@ -24,6 +24,14 @@ NLOHMANN_JSON_SERIALIZE_ENUM(ProcessStatus, {
                                                 { ProcessStatus::Restarting, "restarting" },
                                             });
 
+enum struct RestartMode { Normal, Force, Prevent };
+
+NLOHMANN_JSON_SERIALIZE_ENUM(RestartMode, {
+                                              { RestartMode::Normal, 0 },
+                                              { RestartMode::Force, 1 },
+                                              { RestartMode::Prevent, -1 },
+                                          });
+
 struct RestartPolicy {
   bool enabled;
   int max;
@@ -42,7 +50,7 @@ struct ProcessInfo {
   pid_t pid;
   ProcessStatus status;
   int restart;
-  bool sched_restart;
+  RestartMode restart_mode;
   std::chrono::system_clock::time_point start_time, dead_time;
   ProcessLaunchOptions options;
   int fd, log;
